@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
@@ -42,7 +43,7 @@ def safe_generate_content(model_name, img, prompt):
 
 
 def extract_encoding_gemini(image):
-    """Extract survey form data using Gemini and parse JSON response."""
+    """Extract survey form data using Gemini with model fallback and 429 quota handling."""
     prompt = """
     Extract data from this survey form into a JSON list.
     For page 1 "LAS INFORMATION" section upto "OTHER NON MNTHL" and page 2 "LAS PROFILING" upto "REGISTRATION- WITH UPC" section:
@@ -54,14 +55,31 @@ def extract_encoding_gemini(image):
     Only return valid JSON array with 1 object, no other text.
     Example: [{"LAST NAME": "AMORIN", "FIRST NAME": "RANDEL", "AGE": "46", "SMOKER": "/", "MALE": "/,1", "FEMALE": "/,1", "MB RED": "/,1", "REGISTRATION WITH UPC": "FXDHQRZ"}]
     """
-    # Updated model names to active endpoints
-    try:
-        response = safe_generate_content("gemini-2.5-flash", image, prompt)
-    except Exception:
-        response = safe_generate_content("gemini-2.0-flash", image, prompt)
+    
+    # Model fallbacks ordered by performance and quota availability
+    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
+    response = None
+    last_error = None
+
+    for model_name in models_to_try:
+        try:
+            response = safe_generate_content(model_name, image, prompt)
+            break  # Success! Exit loop
+        except Exception as e:
+            last_error = e
+            err_msg = str(e)
+            if "429" in err_msg or "quota" in err_msg.lower():
+                # Pause briefly to allow free-tier rate limits to reset before trying the next model
+                st.toast(f"⏳ Rate limit hit on `{model_name}`. Switching model...", icon="⚠️")
+                time.sleep(3)
+            continue
+
+    if not response:
+        raise Exception(f"All model attempts failed. Last error: {last_error}")
 
     json_text = response.text.strip()
-    # Robust clean markdown code block wraps
+    
+    # Clean markdown code block wraps
     match = re.search(r"```(?:json)?\s*(.*?)\s*```", json_text, re.DOTALL)
     if match:
         json_text = match.group(1).strip()
