@@ -56,8 +56,8 @@ def extract_encoding_gemini(image):
     Example: [{"LAST NAME": "AMORIN", "FIRST NAME": "RANDEL", "AGE": "46", "SMOKER": "/", "MALE": "/,1", "FEMALE": "/,1", "MB RED": "/,1", "REGISTRATION WITH UPC": "FXDHQRZ"}]
     """
     
-    # Model fallbacks ordered by performance and quota availability
-    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
+    # Active Gemini models list
+    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
     response = None
     last_error = None
 
@@ -69,7 +69,6 @@ def extract_encoding_gemini(image):
             last_error = e
             err_msg = str(e)
             if "429" in err_msg or "quota" in err_msg.lower():
-                # Pause briefly to allow free-tier rate limits to reset before trying the next model
                 st.toast(f"⏳ Rate limit hit on `{model_name}`. Switching model...", icon="⚠️")
                 time.sleep(3)
             continue
