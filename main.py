@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
@@ -8,10 +9,15 @@ import streamlit as st
 import google.generativeai as genai
 
 st.set_page_config(page_title="DAR - Gemini AI", layout="wide")
-st.title(":memo: DAR Form Scanner - Gemini AI")
+st.title("📝 DAR Form Scanner - Gemini AI")
 
-# Setup Gemini API
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else os.getenv("GEMINI_API_KEY")
+# Setup Gemini API with missing key guard
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    st.error("⚠️ GEMINI_API_KEY is missing! Please configure it in your Streamlit Cloud Secrets settings.")
+    st.stop()
+
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Google Sheets setup
@@ -24,7 +30,8 @@ def get_gsheet_client():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+    service_account_info = dict(st.secrets["gcp_service_account"])
+    creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
     return gspread.authorize(creds)
 
 
@@ -47,15 +54,17 @@ def extract_encoding_gemini(image):
     Only return valid JSON array with 1 object, no other text.
     Example: [{"LAST NAME": "AMORIN", "FIRST NAME": "RANDEL", "AGE": "46", "SMOKER": "/", "MALE": "/,1", "FEMALE": "/,1", "MB RED": "/,1", "REGISTRATION WITH UPC": "FXDHQRZ"}]
     """
+    # Updated to active, supported Gemini model names
     try:
-        response = safe_generate_content("gemini-2.5-flash", image, prompt)
+        response = safe_generate_content("gemini-1.5-flash", image, prompt)
     except Exception:
-        response = safe_generate_content("gemini-2.5-flash-lite", image, prompt)
+        response = safe_generate_content("gemini-1.5-pro", image, prompt)
 
     json_text = response.text.strip()
-    # Clean markdown code block wraps if present
-    if json_text.startswith("```"):
-        json_text = json_text.strip("`").replace("json\n", "", 1).strip()
+    # Robust clean markdown code block wraps
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", json_text, re.DOTALL)
+    if match:
+        json_text = match.group(1).strip()
 
     return json.loads(json_text)
 
@@ -70,13 +79,14 @@ if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Ready to scan", use_container_width=True)
 
-    if st.button(":mag: Run AI Scan", type="primary"):
+    if st.button("🔍 Run AI Scan", type="primary"):
         with st.spinner('Gemini AI is reading... ~3-5 seconds'):
             try:
                 table_data = extract_encoding_gemini(image)
                 if table_data:
-                    st.success(":white_check_mark: Extracted survey data!")
+                    st.success("✅ Extracted survey data!")
                     st.session_state.df = pd.DataFrame(table_data)
+                    st.rerun()
                 else:
                     st.warning("Walang na-detect na data. Try mo mas malinaw na picture.")
             except Exception as e:
@@ -84,7 +94,7 @@ if uploaded_file:
 
 # Show editor + sync controls if data exists
 if st.session_state.df is not None:
-    st.subheader(":clipboard: Verify Data - Edit mo kung may mali")
+    st.subheader("📋 Verify Data - Edit mo kung may mali")
     
     edited_df = st.data_editor(
         st.session_state.df,
@@ -98,7 +108,7 @@ if st.session_state.df is not None:
     with col1:
         csv = st.session_state.df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            ":inbox_tray: Download CSV",
+            "📥 Download CSV",
             csv,
             "dar_data.csv",
             "text/csv",
@@ -106,7 +116,7 @@ if st.session_state.df is not None:
         )
 
     with col2:
-        if st.button(":rocket: Sync All to Google Sheets", use_container_width=True):
+        if st.button("🚀 Sync All to Google Sheets", use_container_width=True):
             try:
                 with st.spinner('Syncing to Google Sheets...'):
                     client = get_gsheet_client()
@@ -126,12 +136,12 @@ if st.session_state.df is not None:
                         # Append only new data rows if headers already exist
                         sheet.append_rows(rows, value_input_option='USER_ENTERED')
 
-                    st.success(f":white_check_mark: {len(rows)} row(s) synced sa Google Sheets!")
+                    st.success(f"✅ {len(rows)} row(s) synced sa Google Sheets!")
                     st.balloons()
             except Exception as e:
                 st.error(f"Sync failed: {str(e)}")
                 st.code(f"Error details: {repr(e)}")
                 st.info("Check: 1. Naka-share ba sheet sa service account? 2. Tama ba secrets?")
 else:
-    st.info(":point_up_2: Upload a dar photo to start")
-    st.warning(":warning: REVIEW and EDIT kung may MALI")
+    st.info("👆 Upload a dar photo to start")
+    st.warning("⚠️ REVIEW and EDIT kung may MALI")
