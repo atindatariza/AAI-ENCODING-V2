@@ -1,11 +1,11 @@
-import streamlit as st
-import pandas as pd
-import google.generativeai as genai
 import json
 import os
-from PIL import Image
 import gspread
 from google.oauth2.service_account import Credentials
+import pandas as pd
+from PIL import Image
+import streamlit as st
+import google.generativeai as genai
 
 st.set_page_config(page_title="DAR - Gemini AI", layout="wide")
 st.title(":memo: DAR Form Scanner - Gemini AI")
@@ -17,22 +17,25 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Google Sheets setup
 SHEET_ID = "1F1CaSvB7zVaw0fmk_bIUJC1auQ2MvHrgvLBd2kwkP70"
 
+
 def get_gsheet_client():
-    """Connect to Google Sheets using service account"""
+    """Connect to Google Sheets using service account credentials."""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
-    client = gspread.authorize(creds)
-    return client
+    return gspread.authorize(creds)
+
 
 def safe_generate_content(model_name, img, prompt):
+    """Generate content using the specified Gemini model."""
     model = genai.GenerativeModel(model_name)
-    response = model.generate_content([prompt, img])
-    return response
+    return model.generate_content([prompt, img])
+
 
 def extract_encoding_gemini(image):
+    """Extract survey form data using Gemini and parse JSON response."""
     prompt = """
     Extract data from this survey form into a JSON list.
     For page 1 "LAS INFORMATION" section upto "OTHER NON MNTHL" and page 2 "LAS PROFILING" upto "REGISTRATION- WITH UPC" section:
@@ -48,13 +51,14 @@ def extract_encoding_gemini(image):
         response = safe_generate_content("gemini-2.5-flash", image, prompt)
     except Exception:
         response = safe_generate_content("gemini-2.5-flash-lite", image, prompt)
-        
+
     json_text = response.text.strip()
-    if json_text.startswith("```json"):
-        json_text = json_text.replace("```json", "").replace("```", "").strip()
-    elif json_text.startswith("```"):
-        json_text = json_text.replace("```", "").strip()
+    # Clean markdown code block wraps if present
+    if json_text.startswith("```"):
+        json_text = json_text.strip("`").replace("json\n", "", 1).strip()
+
     return json.loads(json_text)
+
 
 # Initialize session state
 if 'df' not in st.session_state:
@@ -65,11 +69,10 @@ uploaded_file = st.file_uploader("Upload DAR Photo", type=['png', 'jpg', 'jpeg']
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Ready to scan", use_container_width=True)
-    
+
     if st.button(":mag: Run AI Scan", type="primary"):
         with st.spinner('Gemini AI is reading... ~3-5 seconds'):
             try:
-                # Fixed function name here
                 table_data = extract_encoding_gemini(image)
                 if table_data:
                     st.success(":white_check_mark: Extracted survey data!")
@@ -79,9 +82,10 @@ if uploaded_file:
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
-# Show editor + buttons if data exists
+# Show editor + sync controls if data exists
 if st.session_state.df is not None:
     st.subheader(":clipboard: Verify Data - Edit mo kung may mali")
+    
     edited_df = st.data_editor(
         st.session_state.df,
         num_rows="dynamic",
@@ -100,20 +104,29 @@ if st.session_state.df is not None:
             "text/csv",
             use_container_width=True
         )
+
     with col2:
         if st.button(":rocket: Sync All to Google Sheets", use_container_width=True):
             try:
                 with st.spinner('Syncing to Google Sheets...'):
                     client = get_gsheet_client()
                     sheet = client.open_by_key(SHEET_ID).sheet1
-                    rows = st.session_state.df.values.tolist()
                     
-                    # Add headers if sheet is empty
-                    if len(sheet.get_all_values()) == 0:
-                        sheet.append_row(st.session_state.df.columns.tolist())
-                        
-                    sheet.append_rows(rows, value_input_option='USER_ENTERED')
-                    st.success(f":white_check_mark: {len(rows)} rows synced sa Google Sheets!")
+                    # Convert DataFrame to clean strings/lists for gspread
+                    df_to_sync = st.session_state.df.fillna("")
+                    headers = df_to_sync.columns.tolist()
+                    rows = df_to_sync.astype(str).values.tolist()
+
+                    existing_records = sheet.get_all_values()
+                    
+                    if len(existing_records) == 0:
+                        # Append both header and rows if spreadsheet is empty
+                        sheet.append_rows([headers] + rows, value_input_option='USER_ENTERED')
+                    else:
+                        # Append only new data rows if headers already exist
+                        sheet.append_rows(rows, value_input_option='USER_ENTERED')
+
+                    st.success(f":white_check_mark: {len(rows)} row(s) synced sa Google Sheets!")
                     st.balloons()
             except Exception as e:
                 st.error(f"Sync failed: {str(e)}")
