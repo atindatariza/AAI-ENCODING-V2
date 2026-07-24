@@ -54,11 +54,11 @@ def extract_encoding_gemini(image):
     Only return valid JSON array with 1 object, no other text.
     Example: [{"LAST NAME": "AMORIN", "FIRST NAME": "RANDEL", "AGE": "46", "SMOKER": "/", "MALE": "/,1", "FEMALE": "/,1", "MB RED": "/,1", "REGISTRATION WITH UPC": "FXDHQRZ"}]
     """
-    # Updated to active, supported Gemini model names
+    # Updated model names to active endpoints
     try:
-        response = safe_generate_content("gemini-1.5-flash", image, prompt)
+        response = safe_generate_content("gemini-2.5-flash", image, prompt)
     except Exception:
-        response = safe_generate_content("gemini-1.5-pro", image, prompt)
+        response = safe_generate_content("gemini-2.0-flash", image, prompt)
 
     json_text = response.text.strip()
     # Robust clean markdown code block wraps
