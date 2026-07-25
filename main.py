@@ -43,7 +43,7 @@ def safe_generate_content(model_name, img, prompt):
 
 
 def extract_encoding_gemini(image):
-    """Extract survey form data using Gemini with model fallback and 429 quota handling."""
+    """Extract survey form data using Gemini with valid model fallbacks and 429 quota handling."""
     prompt = """
     Extract data from this survey form into a JSON list.
     For page 1 "LAS INFORMATION" section upto "OTHER NON MNTHL" and page 2 "LAS PROFILING" upto "REGISTRATION- WITH UPC" section:
@@ -56,8 +56,8 @@ def extract_encoding_gemini(image):
     Example: [{"LAST NAME": "AMORIN", "FIRST NAME": "RANDEL", "AGE": "46", "SMOKER": "/", "MALE": "/,1", "FEMALE": "/,1", "MB RED": "/,1", "REGISTRATION WITH UPC": "FXDHQRZ"}]
     """
     
-    # Active Gemini models list
-    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+    # Active, stable Gemini models (ordered by efficiency)
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
     response = None
     last_error = None
 
@@ -69,11 +69,13 @@ def extract_encoding_gemini(image):
             last_error = e
             err_msg = str(e)
             if "429" in err_msg or "quota" in err_msg.lower():
-                st.toast(f"⏳ Rate limit hit on `{model_name}`. Switching model...", icon="⚠️")
-                time.sleep(3)
+                st.toast(f"⏳ Rate limit hit on `{model_name}`. Trying fallback...", icon="⚠️")
+                time.sleep(2)
             continue
 
     if not response:
+        if "429" in str(last_error) or "quota" in str(last_error).lower():
+            raise Exception("Naubos na ang free API quota for today. Gumawa ng bagong API key sa Google AI Studio or subukan ulit bukas.")
         raise Exception(f"All model attempts failed. Last error: {last_error}")
 
     json_text = response.text.strip()
